@@ -89,3 +89,72 @@ MCP 服务器通过 stdio 与 LLM（Codex、Claude Desktop 等）通信。
 
 - 官方 Computer Use 插件由 OpenAI 开发，本仓库是独立的开源实现
 - 仅供学习和研究使用
+
+### 独立 CLI（不依赖 Codex）
+
+`run.py` 通过 OpenAI 兼容 API 直接驱动，无需 Codex 或 Claude Desktop。
+
+```bash
+pip install openai python-dotenv
+```
+
+#### 配置方式（优先级从高到低）
+
+**① 命令行参数**
+
+```bash
+python run.py -m "hermes3:vision" -b "http://localhost:11434/v1" -k "ollama" "打开抖音搜视频"
+```
+
+| 参数 | 说明 | 默认值 |
+|---|---|---|
+| `-m, --model` | 模型名 | `gpt-5` |
+| `-b, --base-url` | API 地址 | `https://api.openai.com/v1` |
+| `-k, --api-key` | API 密钥 | — |
+| `-s, --max-steps` | 最大步数 | `30` |
+
+**② 环境变量**
+
+```bash
+export COMPUTER_USE_MODEL="hermes3:vision"
+export COMPUTER_USE_BASE_URL="http://localhost:11434/v1"
+export COMPUTER_USE_API_KEY="ollama"
+python run.py "打开抖音搜视频"
+```
+
+兼容 `OPENAI_API_KEY`、`OPENAI_BASE_URL`（向后兼容）。
+
+**③ `.env` 文件**
+
+在项目根目录创建 `.env`（已加入 `.gitignore`）：
+
+```
+COMPUTER_USE_MODEL=hermes3:vision
+COMPUTER_USE_BASE_URL=http://localhost:11434/v1
+COMPUTER_USE_API_KEY=ollama
+COMPUTER_USE_MAX_STEPS=20
+```
+
+四种方式可混用——比如 key 写在 `.env`，模型名临时用 `-m` 覆盖。
+
+#### 多模型示例
+
+```bash
+# OpenAI
+python run.py -k "sk-xxx" "搜索热点新闻"
+
+# Hermes (via Ollama) — 需要视觉版本
+python run.py -m "hermes3:vision" -b "http://localhost:11434/v1" -k "ollama" "打开抖音"
+
+# 通义千问 (via DashScope)
+python run.py -m "qwen-vl-max" -b "https://dashscope.aliyuncs.com/compatible-mode/v1" -k "sk-xxx" "截图"
+
+# DeepSeek
+python run.py -m "deepseek-chat" -b "https://api.deepseek.com/v1" -k "sk-xxx" "列出运行的应用"
+
+# 任意 OpenAI 兼容 API
+python run.py -m "your-model" -b "https://your-api.com/v1" -k "your-key" "任务描述"
+```
+
+要求模型支持 **视觉（看图）+ function calling（调工具）**。
+
