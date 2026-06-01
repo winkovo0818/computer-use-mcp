@@ -172,21 +172,48 @@ def list_apps() -> list[dict[str, Any]]:
     return apps
 
 
-def launch_app(exe_path: str) -> bool:
-    """启动一个 exe 文件。"""
+# macOS bundle_id → Windows exe name mapping for common apps
+_BUNDLE_TO_EXE = {
+    "com.google.Chrome": "chrome.exe",
+    "com.apple.Safari": "iexplore.exe",
+    "com.apple.mail": "outlook.exe",
+    "com.spotify.client": "spotify.exe",
+    "com.apple.Music": "wmplayer.exe",
+    "com.apple.iCal": "outlook.exe",
+    "com.apple.Terminal": "cmd.exe",
+    "com.apple.finder": "explorer.exe",
+    "com.apple.Notes": "notepad.exe",
+    "com.microsoft.VSCode": "code.exe",
+    "com.apple.TextEdit": "notepad.exe",
+    "com.apple.Preview": "mspaint.exe",
+    "com.apple.systempreferences": "control.exe",
+    "com.apple.AppStore": "ms-windows-store:",
+}
+
+
+def launch_app(bundle_id: str) -> bool:
+    """启动应用。接受 macOS bundle_id 或 Windows exe/应用名。"""
     import subprocess
+    # Try mapping bundle_id → Windows executable
+    exe = _BUNDLE_TO_EXE.get(bundle_id, bundle_id)
     try:
-        subprocess.Popen(exe_path, shell=True)
+        subprocess.Popen(exe, shell=True)
         return True
     except Exception:
-        return False
+        # Last resort: try by name
+        try:
+            subprocess.Popen(bundle_id, shell=True)
+            return True
+        except Exception:
+            return False
 
 
-def quit_app(pid_or_name: str) -> bool:
-    """通过进程名退出应用。"""
+def quit_app(bundle_id: str) -> bool:
+    """退出应用。接受 macOS bundle_id 或 Windows 进程名。"""
     import subprocess
+    exe = _BUNDLE_TO_EXE.get(bundle_id, bundle_id)
     try:
-        subprocess.run(["taskkill", "/F", "/IM", pid_or_name],
+        subprocess.run(["taskkill", "/F", "/IM", exe],
                        capture_output=True, timeout=10)
         return True
     except Exception:

@@ -2,7 +2,7 @@
 """
 Computer Use MCP Server
 =======================
-Exposes macOS desktop automation tools to LLMs via the Model Context Protocol.
+Cross-platform desktop automation via the Model Context Protocol.
 
 Start:  python mcp_server.py
 Test:   npx @modelcontextprotocol/inspector python mcp_server.py
@@ -17,7 +17,13 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from mcp.server.fastmcp import FastMCP
-import computer_use as cu
+import sys as _sys
+if _sys.platform == "darwin":
+    import computer_use as cu
+elif _sys.platform == "win32":
+    import computer_use_windows as cu
+else:
+    raise RuntimeError(f"Unsupported platform: {_sys.platform}. Only macOS and Windows are supported.")
 
 # ---------------------------------------------------------------------------
 # FastMCP server
@@ -25,7 +31,7 @@ import computer_use as cu
 
 mcp = FastMCP(
     name="Computer Use",
-    instructions="""You are a macOS desktop automation agent. You can see the
+    instructions="""You are a desktop automation agent. You can see the
 screen and control the mouse, keyboard, and apps.
 
 Workflow:
