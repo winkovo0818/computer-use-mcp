@@ -2,24 +2,98 @@
 """
 Computer Use 独立 CLI
 ======================
-不依赖 Codex/Claude Desktop，直接用 OpenAI API 驱动桌面自动化。
+不依赖 Codex/Claude Desktop，直接用 OpenAI 兼容 API 驱动桌面自动化。
+
+环境变量（优先级：命令行 > 环境变量 > .env 文件 > 默认值）:
+
+    COMPUTER_USE_API_KEY    API 密钥
+    COMPUTER_USE_BASE_URL   API 地址 (默认 https://api.openai.com/v1)
+    COMPUTER_USE_MODEL      模型名 (默认 gpt-5)
+    COMPUTER_USE_MAX_STEPS  最大步数 (默认 30)
 
 用法:
-    export OPENAI_API_KEY="sk-..."
-    python run.py "打开浏览器，搜索今天的热点新闻"
 
-依赖: pip install openai (加上已有的 mcp 依赖)
+    python run.py "打开浏览器搜索今天的热点新闻"
+    python run.py -m "hermes3:vision" -b "http://localhost:11434/v1" "你的任务"
+    python run.py --model gpt-5 --api-key sk-xxx "你的任务"
+
+安装:
+
+    pip install openai python-dotenv
 """
 
 from __future__ import annotations
 
+import argparse
 import base64
 import json
 import os
 import sys
 import time
+from pathlib import Path
 
-# 自动选择平台引擎
+# --------------- 环境变量加载 ---------------
+
+try:
+    from dotenv import load_dotenv
+    # 优先加载当前目录的 .env，其次是用户目录
+    for env_path in [Path.cwd() / ".env", Path.home() / ".computer-use.env"]:
+        if env_path.exists():
+            load_dotenv(env_path)
+except ImportError:
+    pass  # python-dotenv 可选
+
+
+# --------------- 配置解析 ---------------
+
+def _get_config() -> dict:
+    """收集配置：命令行参数 → 环境变量 → 默认值"""
+    parser = argparse.ArgumentParser(
+        description="Computer Use — 用 LLM 驱动桌面自动化",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  python run.py "打开浏览器搜索新闻"
+  python run.py -m "hermes3:vision" -b "http://localhost:11434/v1" "打开抖音"
+  python run.py --model gpt-5 --api-key sk-xxx "搜索文件"
+
+环境变量:
+  COMPUTER_USE_API_KEY, COMPUTER_USE_BASE_URL, COMPUTER_USE_MODEL, COMPUTER_USE_MAX_STEPS
+  也支持 OPENAI_API_KEY, OPENAI_BASE_URL（向后兼容）
+        """,
+    )
+    parser.add_argument("task", nargs="+", help="要执行的任务描述")
+    parser.add_argument("-m", "--model", default=None, help="模型名 (默认 gpt-5)")
+    parser.add_argument("-b", "--base-url", default=None, help="API 地址 (默认 https://api.openai.com/v1)")
+    parser.add_argument("-k", "--api-key", default=None, help="API 密钥")
+    parser.add_argument("-s", "--max-steps", type=int, default=None, help="最大步数 (默认 30)")
+
+    args = parser.parse_args()
+
+    # 优先级: 命令行 > 环境变量 (COMPUTER_USE_*) > 环境变量 (OPENAI_*) > 默认值
+    api_key = args.api_key or os.environ.get("COMPUTER_USE_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    base_url = args.base_url or os.environ.get("COMPUTER_USE_BASE_URL") or os.environ.get("OPENAI_BASE_URL")
+    model = args.model or os.environ.get("COMPUTER_USE_MODEL") or os.environ.get("OPENAI_MODEL") or "gpt-5"
+    max_steps = args.max_steps or int(os.environ.get("COMPUTER_USE_MAX_STEPS", "0")) or 30
+
+    if not api_key:
+        print("错误: 未提供 API 密钥。请通过以下方式之一提供:")
+        print("  1. 命令行: python run.py -k sk-xxx \"任务\"")
+        print("  2. 环境变量: export COMPUTER_USE_API_KEY=sk-xxx")
+        print("  3. .env 文件: 在项目目录创建 .env，写入 COMPUTER_USE_API_KEY=sk-xxx")
+        sys.exit(1)
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url or "https://api.openai.com/v1",
+        "model": model,
+        "max_steps": max_steps,
+        "task": " ".join(args.task),
+    }
+
+
+# --------------- 平台引擎 ---------------
+
 if sys.platform == "darwin":
     import computer_use as cu
 elif sys.platform == "win32":
@@ -30,9 +104,7 @@ else:
 from openai import OpenAI
 
 
-# ---------------------------------------------------------------------------
-# 工具定义（与 mcp_server.py 保持一致）
-# ---------------------------------------------------------------------------
+# --------------- 工具定义 ---------------
 
 TOOLS = [
     {
@@ -50,8 +122,8 @@ TOOLS = [
             "properties": {
                 "x": {"type": "integer", "description": "X 坐标(像素)"},
                 "y": {"type": "integer", "description": "Y 坐标(像素)"},
-                "button": {"type": "string", "enum": ["left", "right", "center"], "description": "鼠标按钮"},
-                "clicks": {"type": "integer", "description": "点击次数，2=双击"},
+                "button": {"type": "string", "enum": ["left", "right", "center"]},
+                "clicks": {"type": "integer", "description": "1=单击, 2=双击"},
             },
             "required": ["x", "y"],
         },
@@ -64,7 +136,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "direction": {"type": "string", "enum": ["up", "down", "left", "right"]},
-                "pages": {"type": "number", "description": "滚动页数"},
+                "pages": {"type": "number", "description": "滚动页数，支持小数"},
             },
             "required": ["direction"],
         },
@@ -72,24 +144,20 @@ TOOLS = [
     {
         "type": "function",
         "name": "press_key_combo",
-        "description": "按下组合键。例如 'cmd+a', 'ctrl+t', 'return', 'escape'。",
+        "description": "按下组合键。如 'cmd+a', 'ctrl+t', 'return', 'escape'。",
         "parameters": {
             "type": "object",
-            "properties": {
-                "combo": {"type": "string", "description": "组合键字符串"},
-            },
+            "properties": {"combo": {"type": "string"}},
             "required": ["combo"],
         },
     },
     {
         "type": "function",
         "name": "type_input",
-        "description": "在当前光标位置输入文字。",
+        "description": "在当前光标位置输入文字（支持中文）。",
         "parameters": {
             "type": "object",
-            "properties": {
-                "text": {"type": "string", "description": "要输入的文本"},
-            },
+            "properties": {"text": {"type": "string"}},
             "required": ["text"],
         },
     },
@@ -102,12 +170,10 @@ TOOLS = [
     {
         "type": "function",
         "name": "launch_application",
-        "description": "启动一个应用。bundle_id 如 'com.google.Chrome', 'com.apple.Safari'。",
+        "description": "启动应用。macOS: bundle_id 如 'com.google.Chrome'。Windows: exe 路径。",
         "parameters": {
             "type": "object",
-            "properties": {
-                "bundle_id": {"type": "string", "description": "应用 bundle identifier"},
-            },
+            "properties": {"bundle_id": {"type": "string"}},
             "required": ["bundle_id"],
         },
     },
@@ -117,22 +183,20 @@ TOOLS = [
         "description": "任务完成，返回最终结果。",
         "parameters": {
             "type": "object",
-            "properties": {
-                "result": {"type": "string", "description": "任务的最终结果描述"},
-            },
+            "properties": {"result": {"type": "string"}},
             "required": ["result"],
         },
     },
 ]
 
-# 工具执行映射
-def execute_tool(name: str, args: dict) -> str:
+
+def _execute_tool(name: str, args: dict) -> str:
     if name == "get_app_state":
         state = cu.get_app_state()
         return json.dumps({
             "app_name": state.app_name,
             "pid": state.pid,
-            "screenshot_b64": state.screenshot_b64[:200] + "...",  # 不重复发给 LLM
+            "screenshot_b64": state.screenshot_b64[:200] + "...",
             "elements_count": len(state.tree.get("elements", [])),
             "running_apps": len(state.apps),
         }, ensure_ascii=False)
@@ -160,9 +224,7 @@ def execute_tool(name: str, args: dict) -> str:
     return "unknown tool"
 
 
-# ---------------------------------------------------------------------------
-# 核心循环
-# ---------------------------------------------------------------------------
+# --------------- 核心循环 ---------------
 
 SYSTEM_PROMPT = """你是桌面自动化助手。你可以截取屏幕、点击、滚动、打字、按键。
 
@@ -181,32 +243,29 @@ SYSTEM_PROMPT = """你是桌面自动化助手。你可以截取屏幕、点击�
 """
 
 
-def run(task: str, max_steps: int = 30) -> str:
-    """用 OpenAI API 驱动 Computer Use 完成一个任务。"""
-    client = OpenAI()
-    model = os.environ.get("COMPUTER_USE_MODEL", "gpt-5")
+def run(config: dict) -> str:
+    client = OpenAI(
+        api_key=config["api_key"],
+        base_url=config["base_url"],
+    )
+    model = config["model"]
+    task = config["task"]
+    max_steps = config["max_steps"]
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": f"请完成以下任务：{task}\n\n先调用 get_app_state 看看当前屏幕。"},
-            ],
-        },
+        {"role": "user", "content": [
+            {"type": "text", "text": f"请完成以下任务：{task}\n\n先调用 get_app_state 看看当前屏幕。"},
+        ]},
     ]
 
     for step in range(max_steps):
         print(f"\n--- Step {step + 1}/{max_steps} ---")
 
         response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            tools=TOOLS,
-            tool_choice="auto",
-            max_tokens=4096,
+            model=model, messages=messages,
+            tools=TOOLS, tool_choice="auto", max_tokens=4096,
         )
-
         msg = response.choices[0].message
 
         if msg.content:
@@ -220,82 +279,61 @@ def run(task: str, max_steps: int = 30) -> str:
             args = json.loads(tc.function.arguments)
             print(f"  → {name}({json.dumps(args, ensure_ascii=False)[:100]})")
 
-            result = execute_tool(name, args)
+            result = _execute_tool(name, args)
 
-            # 如果是截图工具，把截图也发给 LLM
             if name == "get_app_state":
                 state = cu.get_app_state()
                 messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tc.id, "type": "function",
-                        "function": {"name": name, "arguments": tc.function.arguments},
-                    }],
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": tc.id, "type": "function",
+                                     "function": {"name": name, "arguments": tc.function.arguments}}],
                 })
                 messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
+                    "role": "tool", "tool_call_id": tc.id,
                     "content": [
                         {"type": "text", "text": result},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{state.screenshot_b64}",
-                                "detail": "high",
-                            },
-                        },
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:image/png;base64,{state.screenshot_b64}",
+                            "detail": "high",
+                        }},
                     ],
                 })
             elif name == "done":
-                print(f"\n✅ 任务完成: {result}")
+                print(f"\n✅ 完成: {result}")
                 return result
             else:
                 messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": tc.id, "type": "function",
-                        "function": {"name": name, "arguments": tc.function.arguments},
-                    }],
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": tc.id, "type": "function",
+                                     "function": {"name": name, "arguments": tc.function.arguments}}],
                 })
                 messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
+                    "role": "tool", "tool_call_id": tc.id,
                     "content": result,
                 })
 
-            # 操作后短暂等待
             time.sleep(1.0)
 
     return "达到最大步数限制"
 
 
-# ---------------------------------------------------------------------------
-# CLI 入口
-# ---------------------------------------------------------------------------
+# --------------- 入口 ---------------
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("用法: python run.py \"你的任务描述\"")
-        print("示例: python run.py \"打开浏览器搜索今天的热点新闻\"")
-        sys.exit(1)
+    config = _get_config()
 
-    if "OPENAI_API_KEY" not in os.environ:
-        print("错误: 请设置 OPENAI_API_KEY 环境变量")
-        print("  export OPENAI_API_KEY='sk-...'")
-        sys.exit(1)
-
-    task = " ".join(sys.argv[1:])
-    print(f"任务: {task}")
-    print(f"模型: {os.environ.get('COMPUTER_USE_MODEL', 'gpt-5')}")
+    print(f"任务: {config['task']}")
+    print(f"模型: {config['model']}")
+    print(f"接口: {config['base_url']}")
+    print(f"步数: 最多 {config['max_steps']} 步")
     print("=" * 60)
 
     try:
-        result = run(task)
+        result = run(config)
         print(f"\n最终结果: {result}")
     except KeyboardInterrupt:
         print("\n\n已中断")
     except Exception as e:
         print(f"\n错误: {e}")
-        raise
+        import traceback; traceback.print_exc()
+        sys.exit(1)
