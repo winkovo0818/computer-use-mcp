@@ -18,6 +18,62 @@ LLM (大脑)  ←→  MCP stdio  ←→  mcp_server.py  ←→  computer_use.py 
 
 ## 快速开始
 
+
+### 🤖 Agent 一键安装
+
+直接对 AI 助手（Codex / Claude / ChatGPT）说一句话，剩下的全自动完成：
+
+> **「帮我安装 computer-use-mcp，仓库地址 github.com/winkovo0818/computer-use-mcp」**
+
+Agent 会自动执行以下步骤：
+
+```bash
+# 1. 克隆仓库
+git clone https://github.com/winkovo0818/computer-use-mcp.git
+cd computer-use-mcp
+
+# 2. 创建虚拟环境
+python3 -m venv .venv && source .venv/bin/activate
+
+# 3. 安装依赖（Agent 自动检测你的操作系统）
+#    macOS → pip install mcp pyobjc-framework-Quartz ...
+#    Windows → pip install mcp pyautogui pillow uiautomation psutil ...
+
+# 4. 配置 API（如需独立 CLI）
+echo 'COMPUTER_USE_API_KEY=sk-xxx' > .env
+echo 'COMPUTER_USE_MODEL=gpt-5' >> .env
+```
+
+安装完成后，Agent 会提醒你授予 macOS 权限（辅助功能 + 屏幕录制），然后就能直接使用。
+
+**对话示例：**
+
+```
+你：帮我装一下 computer-use-mcp，我要用 Hermes 驱动
+
+Agent：好的，先克隆仓库…
+      ✓ 仓库已克隆
+      ✓ 已创建 Python 虚拟环境
+      ✓ 依赖安装完毕（检测到 macOS，使用 Quartz + NSAppleScript）
+      
+      接下来需要两个权限，请到「系统设置 → 隐私与安全性」：
+      1. 辅助功能 → 添加 /opt/homebrew/bin/python3.13
+      2. 屏幕录制 → 添加你的终端应用
+      
+      搞定后跟我说一声，我来验证。
+
+你：好了
+
+Agent：验证通过！截图功能正常，已检测到 141 个应用。
+      你的 .env 里还没配模型，要现在配吗？
+      比如用 Ollama 本地跑 Hermes？
+
+你：对，用 Ollama 的 hermes3:vision
+
+Agent：已写入 .env。可以用了，试试：
+      python run.py "打开浏览器搜索今天的热点新闻"
+```
+
 ### 前置条件
 
 - Python 3.10+
