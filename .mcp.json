@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "computer-use-local": {
+      "command": "/Users/huangdongsheng/Documents/Codex/2026-06-01/codex-computer-use/.venv-3.13/bin/python3",
+      "args": [
+        "/Users/huangdongsheng/Documents/Codex/2026-06-01/codex-computer-use/mcp_server.py"
+      ],
+      "cwd": "/Users/huangdongsheng/Documents/Codex/2026-06-01/codex-computer-use"
+    }
+  }
+}
